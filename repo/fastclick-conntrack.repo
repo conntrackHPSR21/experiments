@@ -1,0 +1,8 @@
+parent=fastclick-conntrack-base
+name=FastClickConnTrack
+url=http://github.com/conntrackHPSR21/fastclick.git
+branch=conntrack
+configure+=--enable-dpdk CFLAGS="-O3 -DIMP_COUNTERS" CXXFLAGS="-std=gnu++17 -O3 -Wno-register -DIMP_COUNTERS" --enable-research --disable-task-stats --enable-flow --enable-cpu-load --enable-flow-api --enable-dpdk-packet --disable-clone
+tags=click,fastclick,batch,fastclickbased
+//env={RTE_SDK:/home/tom/workspace/conntrack/dpdk/,RTE_TARGET:"",PKG_CONFIG_PATH:/home/tom/workspace/conntrack/dpdk/install/lib/x86_64-linux-gnu/pkgconfig}
+env={RTE_SDK:/home/massimo/repos/dpdk_git/,RTE_TARGET:"",PKG_CONFIG_PATH:/home/massimo/repos/dpdk_git/install/lib/x86_64-linux-gnu/pkgconfig}

@@ -1,0 +1,372 @@
+%info
+Module to replay a trace with throughput and latency testing
+
+Read a minimal summary dump with the 5-tuples and replays it at the maximum speed for TIMES time.
+
+Packets are directed towards one NIC of the "server" role using one NIC of the CLIENT and expect to receive packets back on the same NIC. There is no L3 support (ARP).
+
+Suggested usage example in your testie (omit the prefixed "//" that prevent loop import here)
+
+The trace should be split in 4 different traces:
+    NAME.<HOWMANY>_<ID>.mindump
+HOWMANY is default to 4 and ID is 1...4 according to how many GENERATOR_THREADS are set (default 4).
+
+//%import@client fastclick-mindump-nolat trace=path/to.pcap NIC=0
+
+
+%config
+n_runs=1
+//require_tags=import,dpdk
+timeout=60
+default_role_map={server:dut}
+
+%variables
+PKTGEN_BURST_OUT=32
+// How many times to replay
+TIMES?=1
+// The NIC on the destination side
+DNIC=0
+// Our NIC
+NIC=0
+// How many packets to read from the dump
+-repeatlimit:GENLIMIT?=-1
+// In how many parts are the traces divided?
+// MUST BE >= GENERATOR_THREADS!
+HOWMANY?=4
+// How many threads for the generation
+GENERATOR_THREADS?=4
+RECEIVER_THREADS?=4
+// Should we receive only our frames?
+PROMISC=false
+promisc:PROMISC=true
+// How many seconds to ignore at start
+IGNORE=0
+// DPDK settings
+PAUSE?=none
+GEN_DESC?=0
+
+// To print statistics during the execution
+gentstats:TSTATS_T?=2
+
+// Print counter ID
+COUNTER_RX?=
+// The core mask to use
+GEN_CORES?=0xffff
+
+// Whether the FromMinDump should be in push or pull mode
+pull:PULLDUMP=1
+PULLDUMP?=
+// Limit the rate to X packets per second
+rate:RATE?=625000
+RATE?=
+
+// By default do not shift on repetiton
+-repetitions:SHIFT?=0
+-repetitions:SHIFT_EVERY?=1
+-repeatlimit,-repetitions:TIMES?=1
+-repetitions:TOTAL_TIME?=
+-repeatlimit,repetitions:SHIFT?=1
+-repeatlimit,repetitions:SINGLE_TIME?=1
+-repeatlimit,repetitions:TOTAL_TIME?=60
+-repeatlimit,repetitions:REPETITIONS?=10
+
+// Repetition changing the limit of read flows (1M,2M,3M,...)
+repeatlimit:SHIFT?=0
+repeatlimit:SHIFT_EVERY?=0
+//SINGLE_TIME is the time for the total trace file now
+repeatlimit:SINGLE_TIME?=1
+repeatlimit:TOTAL_TIME?=30
+repeatlimit:GENLIMIT?=4000000
+//TOTAL_FLOWS is the number of flows in the trace file
+repeatlimit:TOTAL_FLOWS?=16000000
+
+
+
+// LATENCY
+// TODO: do we need these mbufs?
+RECORDLIMIT=1000000000
+nolat:RECORDLIMIT=0
+SAMPLE?=10
+
+%late_variables
+gdb:GDB=gdb -ex run -ex "signal 2" -ex "bt" -batch -args
+LIMIT_MBUF?=1000000
+NBBUF=$(( ( ( $LIMIT_MBUF * $GENERATOR_THREADS ) + (max(4096,$PKTGEN_BURST_OUT) * 2 * 4 ) ) + 8192 ))
+
+// Allow the end script to set custom destination mac, otherwise, it will be exapnded to server:$DNIC
+DSTMAC?=
+
+// Print statistics
+TSTATS=
+gentstats:TSTATS=1
+gentstats:TSTATS_T?=5
+gentstats:RESET_INT=3
+track_replays:TRACK_REPLAYS=1
+TRACK_REPLAYS?=
+
+// Are we doing latency tracking?
+LATENCY=1
+nolat:LATENCY=
+
+// The rate is per-thread
+rate:THREAD_RATE=$((  int($RATE / $GENERATOR_THREADS) ))
+// also the generation limit is per-thread
+THREAD_GENLIMIT=$((  int($GENLIMIT/ $GENERATOR_THREADS) if $GENLIMIT != -1 else -1 ))
+
+repetitions:SHIFT_EVERY=EXPAND($REPETITIONS)
+-repeatlimit,repetitions:TIMES=$(( int($TOTAL_TIME / $SINGLE_TIME) ))
+
+repeatlimit:TIMES=$((int( $TOTAL_TIME / ( ( float( $GENLIMIT ) / $TOTAL_FLOWS ) * $SINGLE_TIME ) ) ))
+
+
+
+
+
+//%script deps=fastclick-massimo-hw-counters sudo=true delay=2
+//%script deps=fastclick-massimo-CT-hw sudo=true delay=2
+%script deps=fastclick-gen sudo=true delay=2
+${GDB} ${CLICK_PATH_GEN}click --dpdk -l${GEN_CORES} -- PKTGEN_CONFIG
+
+%file PKTGEN_CONFIG
+$(( "" if "$TOTAL_TIME" else "//")) Message("REPETITON MODE: received TOTAL_TIME ${TOTAL_TIME}, SINGLE_TIME $SINGLE_TIME, REPETITIONS $REPETITIONS")
+$(( "" if "$TOTAL_TIME" else "//")) Message("REPETITON MODE: WILL REPEAT ${TIMES} TIMES, SHIFTING EVERY ${SHIFT_EVERY} ITERATIONS")
+$(( "" if $GENLIMIT else "//")) Message("LIMITS: read at most $GENLIMIT flows, $THREAD_GENLIMIT per each thread")
+
+d :: DPDKInfo(NB_SOCKET_MBUF $NBBUF, NB_SOCKET_MBUF 8192)
+
+define($bout $PKTGEN_BURST_OUT)
+
+define($srcmac ${self:$NIC:mac})
+define($dstmac $(( "$DSTMAC" if "$DSTMAC" else "${server:$DNIC:mac}" )) )
+
+define($ignore $IGNORE)
+
+define($txport ${self:$NIC:pci})
+define($rxport ${self:$NIC:pci})
+define($txverbose 99)
+define($rxverbose 99)
+define($genlimit $THREAD_GENLIMIT)
+define($times $TIMES)
+define($recordLimit $RECORDLIMIT)
+define($sample $SAMPLE)
+
+td :: ToDPDKDevice($txport, BLOCKING true, BURST $bout, VERBOSE $txverbose, IQUEUE $bout, NDESC $GEN_DESC, TCO 1, IPCO 1)
+fd :: FromDPDKDevice($rxport, VERBOSE $rxverbose, MAC $srcmac, PROMISC $PROMISC, PAUSE $PAUSE, NDESC $GEN_DESC, NUMA true, MAXTHREADS $RECEIVER_THREADS)
+
+
+
+elementclass Numberise { $magic |
+    input
+    -> check::CheckIPHeader(CHECKSUM false, OFFSET 14)
+    -> nPacket::NumberPacket(56)
+    -> StoreData(54, $magic)
+    //-> SetIPChecksum
+    -> rt::RecordTimestamp(N $recordLimit, OFFSET 56)
+    -> output
+}
+
+elementclass LatencyReceiver { |
+    input
+    -> Strip(14)
+    -> CheckIPHeader(CHECKSUM false)
+    -> c::Classifier( 40/5601, 40/5602, 40/5603, 40/5604, -)
+    c[0] -> td0::TimestampDiff(gen0/num/rt, OFFSET 42, N $recordLimit, SAMPLE $SAMPLE) -> Discard
+    c[1]
+    $(( "" if $GENERATOR_THREADS>1 else "//")) -> td1::TimestampDiff(gen1/num/rt, OFFSET 42, N $recordLimit, SAMPLE $SAMPLE) 
+    -> Discard
+    c[2]
+    $(( "" if $GENERATOR_THREADS>2 else "//")) -> td2::TimestampDiff(gen2/num/rt, OFFSET 42, N $recordLimit, SAMPLE $SAMPLE)
+    -> Discard
+    c[3] $(( "" if $GENERATOR_THREADS>3 else "//")) -> td3::TimestampDiff(gen3/num/rt, OFFSET 42, N $recordLimit, SAMPLE $SAMPLE)
+    -> Discard
+
+    // Unkownn packets handling
+    c[4] -> Print( "WARNING: unknown or untimestamped packet", -1) -> Discard
+    td0[1] -> Print("WARNING: untimedstamped packet on receiver 0") -> Discard
+    $(( "" if $GENERATOR_THREADS>1 else "//")) td1[1] -> Print("WARNING: untimedstamped packet on receiver 1") -> Discard
+    $(( "" if $GENERATOR_THREADS>2 else "//")) td2[1] -> Print("WARNING: untimedstamped packet on receiver 2") -> Discard
+    $(( "" if $GENERATOR_THREADS>3 else "//")) td3[1] -> Print("WARNING: untimedstamped packet on receiver 3") -> Discard
+
+}    
+
+
+elementclass Generator{ $howmany, $id, $th, $magic |
+    fmd::FromMinDump(${trace}.$(howmany)_$(id).mindump, STOP 1, TIMES $times, LIMIT $genlimit, BURST $bout, DPDK 1,
+	    //SHIFT_ON_LOOP $SHIFT, SHIFT_EVERY $SHIFT_EVERY
+	$(( "" if "${TRACK_REPLAYS}" else "//" )) , LOOP_CALL print_replay${id}.run
+    )
+    //fmd::FromMinDump(${trace}.$(howmany)_$(id).mindump, STOP 1, TIMES $times, LIMIT $genlimit, BURST $bout, DPDK 1, SHIFT_ON_LOOP $SHIFT, SHIFT_EVERY $SHIFT_EVERY, )
+    //fmd::FromMinDump(${trace}.$(howmany)_$(id).mindump, STOP 1, TIMES $times, LIMIT $genlimit, BURST $bout, DPDK 1)
+
+    -> eth::EtherEncap(0x800, $srcmac, $dstmac)
+    //-> EnsureDPDKBuffer
+    
+    // Use this to slow down the generation...
+    $(("" if "$PULLDUMP" else "//")) -> Unqueue
+    $(("" if "$RATE" else "//")) -> RatedUnqueue($THREAD_RATE)
+
+    -> avg :: AverageCounter(IGNORE $ignore)
+    $(( "" if "$LATENCY" else "//")) -> num::Numberise($magic)
+    $(( "" if "$LATENCY" else "//")) -> rt::RecordTimestamp(N $RECORDLIMIT, OFFSET 56)
+    -> ipc :: IPClassifier(tcp or udp, -)
+    // Reset the Checksum, the NIC will compute it for us 
+    ipc[0] ->  ResetIPChecksum(L4 true) -> [0]output;
+    ipc[1] -> [0]output; 
+
+    StaticThreadSched(fmd $th)
+}
+
+
+// SENDING
+$(( "\n".join([ "gen%d :: Generator(${HOWMANY}, %d, %d, \<56%02x>) -> td;" % (i,i+1,i,i+1) for i in range($GENERATOR_THREADS) ]) ))
+
+
+// RECEIVING
+fd 
+    -> avg::AverageCounterIMP(IGNORE $ignore)
+    $(( "-> avgT :: AverageCounterIMP" if "$TSTATS" else "" ))
+    $(( "" if "$LATENCY" else "//"))->  latRecv::LatencyReceiver
+    $(( "//" if "$LATENCY" else ""))-> Discard
+
+
+
+Script(
+   
+    wait 1s,
+    print "Starting generation...",
+    print "EVENT GEN_BEGIN",
+    //print "GENEVENTS-0-RESULT-GENT "$(now),
+    wait ${IGNORE}s,
+    print "Starting bandwidth computation !",
+
+    write gen0/avg.reset,
+    $(("" if $GENERATOR_THREADS >=2 else "//"))write gen1/avg.reset,
+    $(("" if $GENERATOR_THREADS >=3 else "//"))write gen2/avg.reset,
+    $(("" if $GENERATOR_THREADS >=4 else "//"))write gen3/avg.reset,
+    write avg.reset
+    )
+
+DriverManager(  
+		set starttime $(now),
+                pause,
+		// print "WAIT 10 seconds for the cleaning...",
+		// wait 10s,
+                set stoptime $(now),
+		//print "GENEVENTS-1-RESULT-GENT "$(now),
+                print "Rate : ",
+                print $(gen0/avg.link_rate),
+                $(("" if $GENERATOR_THREADS >=2 else "//"))print $(gen1/avg.link_rate),
+                $(("" if $GENERATOR_THREADS >=3 else "//"))print $(gen2/avg.link_rate),
+                $(("" if $GENERATOR_THREADS >=4 else "//"))print $(gen3/avg.link_rate),
+		print "$(avg.link_rate)",
+                print "Count :",
+                print $(gen0/avg.count),
+                $(("" if $GENERATOR_THREADS >=2 else "//"))print $(gen1/avg.count),
+                $(("" if $GENERATOR_THREADS >=3 else "//"))print $(gen2/avg.count),
+                $(("" if $GENERATOR_THREADS >=4 else "//"))print $(gen3/avg.count),
+		print $(avg.count),
+                read fd.hw_count,
+                read fd.count,
+                print "RESULT-TESTTIME $(sub $stoptime $starttime)",
+                print "RESULT-RCVTIME $(avg.time)",
+		set TH $(avg.link_rate),
+		print "RESULT-THROUGHPUT $TH",
+	
+		set CNT $(avg.count),
+		print "RESULT-COUNT $CNT",
+
+		set TX $(gen0/avg.link_rate),
+		$(( "" if $GENERATOR_THREADS >= 2 else "//"))set TX $(add $TX $(gen1/avg.link_rate)), 
+		$(( "" if $GENERATOR_THREADS >= 3 else "//"))set TX $(add $TX $(gen2/avg.link_rate)), 
+		$(( "" if $GENERATOR_THREADS >= 4 else "//"))set TX $(add $TX $(gen3/avg.link_rate)), 
+		print "RESULT-TX $TX",
+
+		set PPS $(avg.rate),
+		print "RESULT-PPS $PPS",
+        set sent $(td.hw_count),
+        set dropped $(sub $sent $(fd.hw_count)),
+        print "RESULT-DROPPED $dropped",
+        print "RESULT-DROPPEDPC $(div $dropped $sent)",
+		
+		// LATENCIES
+		$(( "//" if "$LATENCY" else "")) goto afterLatencies,
+                print "RESULT-LATENCY $(div $(add $(latRecv/td0.average) $(latRecv/td1.average) $(latRecv/td2.average) $(latRecv/td3.average)) 4)",
+                print "RESULT-LAT00 $(div $(add $(latRecv/td0.min) $(latRecv/td1.min) $(latRecv/td2.min) $(latRecv/td3.min)) 4)",
+                print "RESULT-LAT01 $(div $(add $(latRecv/td0.perc01) $(latRecv/td1.perc01) $(latRecv/td2.perc01) $(latRecv/td3.perc01)) 4)",
+                print "RESULT-LAT50 $(div $(add $(latRecv/td0.median) $(latRecv/td1.median) $(latRecv/td2.median) $(latRecv/td3.median)) 4)",
+                print "RESULT-LAT95 $(div $(add $(latRecv/td0.perc95) $(latRecv/td1.perc95) $(latRecv/td2.perc95) $(latRecv/td3.perc95)) 4)",
+                print "RESULT-LAT99 $(div $(add $(latRecv/td0.perc99) $(latRecv/td1.perc99) $(latRecv/td2.perc99) $(latRecv/td3.perc99)) 4)",
+                print "RESULT-LAT100 $(div $(add $(latRecv/td0.max) $(latRecv/td1.max) $(latRecv/td2.max) $(latRecv/td3.max)) 4)",
+
+		label afterLatencies,
+
+
+		$(( "print 'COUNTER-0-RESULT-COUNT '$(td.count)," if '$COUNTER_RX' else "" ))
+		$(( "print 'COUNTER-${COUNTER_RX}-RESULT-COUNT '$(fd.count)," if '$COUNTER_RX' else "" ))
+
+		$(( "" if "$TOTAL_TIME" else "//")) print "RESULT-REPETITIONS_SHIFT_EVERY "$SHIFT_EVERY,
+		$(( "" if "$TOTAL_TIME" else "//")) print "RESULT-REPETITIONS_TIMES "$TIMES,
+
+                print "EVENT GEN_DONE",
+                read fd.xstats,
+                stop);
+
+Script(TYPE $(("ACTIVE" if "$TSTATS" else "PASSIVE")),
+
+		print $(now)"-RESULT-RX $(avgT.link_rate)",
+		print $(now)"-RESULT-RXAVG $(avg.link_rate)",
+
+		set TX $(gen0/avg.link_rate),
+		$(( "" if $GENERATOR_THREADS >= 2 else "//"))set TX $(add $TX $(gen1/avg.link_rate)), 
+		$(( "" if $GENERATOR_THREADS >= 3 else "//"))set TX $(add $TX $(gen2/avg.link_rate)), 
+		$(( "" if $GENERATOR_THREADS >= 4 else "//"))set TX $(add $TX $(gen3/avg.link_rate)), 
+		print "$(now)-RESULT-TX $TX",
+
+		write avgT.reset,
+
+
+		wait ${TSTATS_T}s,
+		loop
+		)
+
+
+// Reset the counters after every third measurement.
+Script(TYPE $(("ACTIVE" if "$TSTATS" else "PASSIVE")),
+	wait $(( ($RESET_INT * $TSTATS_T) + 0.1 ))s,
+	label loop,
+	write avgT.reset,
+	wait $(( $RESET_INT * $TSTATS_T))s,
+	goto loop
+      )
+
+// Loop print for replays
+Script(
+    set replay_cnt1 0,
+    set replay_cnt2 0,
+    set replay_cnt3 0,
+    set replay_cnt4 0,
+    set shift_count 0
+    )
+
+print_replay1::Script( TYPE PASSIVE,
+	print $(now)"-RESULT-REPLAY-1 "$replay_cnt1,
+	set replay_cnt1 $(add $replay_cnt1 1),
+	goto end $(eq $SHIFT_EVERY 0),
+	goto end $(ne $(mod $replay_cnt1 $SHIFT_EVERY) 1),
+	print $(now)"-RESULT-SHIFTS "$shift_count,
+	set shift_count $(add $shift_count 1),
+	label end
+	)
+print_replay2::Script( TYPE PASSIVE,
+	print $(now)"-RESULT-REPLAY-2 "$replay_cnt2,
+	set replay_cnt2 $(add $replay_cnt2 1)
+	)
+print_replay3::Script( TYPE PASSIVE,
+	print $(now)"-RESULT-REPLAY-3 "$replay_cnt3,
+	set replay_cnt3 $(add $replay_cnt3 1)
+	)
+print_replay4::Script( TYPE PASSIVE,
+	print $(now)"-RESULT-REPLAY-4 "$replay_cnt4,
+	set replay_cnt4 $(add $replay_cnt4 1)
+	)
+

@@ -1,0 +1,7 @@
+parent=click
+//configure=RTE_SDK=/home/tom/workspace/conntrack/dpdk/ PKG_CONFIG_PATH=/home/tom/workspace/conntrack/dpdk/install/lib/x86_64-linux-gnu/pkgconfig/ ./configure --disable-linuxmodule --enable-userlevel --enable-user-multithread --enable-etherswitch --enable-bound-port-transfer --disable-dynamic-linking --enable-local --enable-dpdk CFLAGS="-O3" CXXFLAGS="-std=gnu++17 -O3 -Wno-register" --enable-research --enable-gtp --disable-task-stats --enable-flow --disable-task-stats --enable-cpu-load
+//make=RTE_SDK=/home/tom/workspace/conntrack/dpdk/ PKG_CONFIG_PATH=/home/tom/workspace/conntrack/dpdk/install/lib/x86_64-linux-gnu/pkgconfig/ make
+//clean=RTE_SDK=/home/tom/workspace/conntrack/dpdk/ PKG_CONFIG_PATH=/home/tom/workspace/conntrack/dpdk/install/lib/x86_64-linux-gnu/pkgconfig/ make clean
+//configure=RTE_SDK=/home/massimo/repos/dpdk_git/ PKG_CONFIG_PATH=/home/massimo/repos/dpdk_git/install/lib/x86_64-linux-gnu/pkgconfig/ ./configure --disable-linuxmodule --enable-userlevel --enable-user-multithread --enable-etherswitch --enable-bound-port-transfer --disable-dynamic-linking --enable-local --enable-dpdk CFLAGS="-O3" CXXFLAGS="-std=gnu++17 -O3 -Wno-register" --enable-research --enable-gtp --disable-task-stats --enable-flow --disable-task-stats --enable-cpu-load
+//make=RTE_SDK=/home/massimo/repos/dpdk_git/ PKG_CONFIG_PATH=/home/massimo/repos/dpdk_git/install/lib/x86_64-linux-gnu/pkgconfig/ make
+//clean=RTE_SDK=/home/massimo/repos/dpdk_git/  PKG_CONFIG_PATH=/home/massimo/repos/dpdk_git/install/lib/x86_64-linux-gnu/pkgconfig/ make clean

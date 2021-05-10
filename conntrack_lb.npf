@@ -1,0 +1,627 @@
+%info
+
+Run different types of FlowIPManager and look at cycle counters and other variables
+
+
+%config
+// The time cycles in LOG scale
+var_lim={CYCLES-PP:0-20000,MATCHED-RATIO:0-1,HW_MATCHED_RATIO:0-1,INSERTS_CYCLES:0-1000,LOOKUPS_CYCLES:0-1000,avgload:10-100,RX:0-100000000000,RXAVG:0-100000000000,RX_LOAD:0-1}
+//var_as_series={TIMEOUT}
+//series_as_variables=true
+//var_combine={MAINTAIN+RECYCLED:REPLACED,time-MAINTAIN+time-RECYCLED:time-REPLACED,AVG-MAINTAIN+AVG-RECYCLED:AVG-REPLACED,
+//graph_subplot_results={TOTALT-MAINTAIN+RECYCLED:2}
+accept_zero={KILLED_PACKETS,RECYCLED}
+var_sync={time,flows}
+//results_expect={THROUGHPUT}
+//var_sync_drop_zero={time}
+//precisions={avgload:3,RX_LOAD:3,MAINTAIN_ NOBATCHCYCLES:3,MAINTAIN_RECYCLED:3,REPLAY:3,RECYCLED:3,SHIFTS:3}
+time_precision=3
+var_unit={THROUGHPUT: }
+var_format={result-THROUGHPUT:%d,avgload:%d}
+var_divider={THROUGHPUT:1000000000,avgload:1,DROPPEDPC:0.01}
+var_names={THROUGHPUT:Throughput (Gbps),LB_CORES:Number of cores,avgload:Average load (%),LOOKUPS_CYCLES:Lookup cycles/packets,INSERTS_CYCLES:Insert cycles/packets,RECYCLE_INTERVAL:Recycling frequency,DROPPEDPC:Packets dropped (%)}
+var_ticks={avgload:25+50+75+100}
+//var_label_dir={THROUGHPUT:diagonal, TX:diagonal, COUNT:diagonal, FLOWS:diagonal, REPLAY-1:diagonal, REPLAY-2:diagonal, REPLAY-3:diagonal, GENTH:diagonal, PPS:diagonal, LOOKUPS_CYCLES:diagonal, INSERTS-CYCLES:diagonal, RX:diagonal}
+graph_fillstyle=none
+graph_markers={o,^,s,D,v,p}
+graph_show_fliers=0
+-legborder:graph_legend_params={fancybox:0,edgecolor:white,framealpha:1.0}
+graph_tick_params={direction:in,which:both,axis:both,grid_linestyle:dotted,bottom:true,top:true,right:true,left:true,grid_color:#444444}
+var_grid=true
+
+%variables
+gdb:GDB=gdb -ex run -ex "signal 2" -ex "bt" -batch -args
+tom:LB_BCORE=0
+massimo:LB_BCORE=18
+LB_CORES=2
+NDESC=512
+MANAGER=FlowIPManager
+NDIPS=10
+CAPACITY=1000000
+HW_LIMIT?=10000
+HT_CAPACITY?=1000000
+AUTOCLEAN?=0
+GROUP=0
+LF=false
+PAUSE=none
+
+// What should we do with non-syn establishment?
+// Accept them
+NONSYN_ACCEPT=1
+// Insert flow rule in the NIC
+NONSYN_INSERT=0
+ALWAYS_RECYCLE?=0
+
+
+
+// GENERATOR
+LIMIT=1000000
+play:LIMIT=20000000
+play:END_AFTER=40
+mindump:GENLIMIT?=-1
+mindump:trace?=/mnt/traces/kth/morning/summaries/morning-quad
+newgen:GEN_MULTI_TRACE=4
+newgen:LIMIT=100000000
+newgen:LIMIT_TIME=8
+long:LIMIT=200000000
+long:LIMIT_TIME=16
+trace?=/mnt/traces/kth/morning/splits/morning-quad.pcap
+
+kth16:trace=/mnt/traces/kth/morning/summaries/morning-16
+kth16,newgen:trace=/mnt/traces/kth/morning/morning-16.pcap
+kth16,mindump:trace=/mnt/traces/kth/morning/summaries/morning-16
+kth32,newgen:trace=/mnt/traces/kth/morning/morning-32.pcap
+kth4,newgen:trace=/mnt/traces/kth/morning/morning-quad.pcap
+kth8,newgen:trace=/mnt/traces/kth/morning/morning-8.pcap
+caida16:trace=/mnt/traces/caida-18/summaries/caida18-16x
+caida16,mindump:trace=/mnt/traces/caida-18/summaries/caida18-16x
+both16:trace={/mnt/traces/kth/morning/morning-16.pcap:Campus,/mnt/traces/caida-18/caida18-16x.pcap:CAIDA}
+
+mindump:GEN_DUMP=2
+
+// repetitions stuff
+
+PKTGEN_REPLAY_COUNT=100
+-repetitions:TIMES=1
+-repetitions:SHIFT=0
+-repetitions:SHIFT_EVERY=0
+-repetitions:TIMEOUT?=0
+-repetitions:RECYCLE_INTERVAL?=1
+
+repetitions:REPETITIONS?=5
+repetitions:RECYCLE_RATIO?=2
+repetitions:TOTAL_TIME?=75
+repetitions:SINGLE_TIME?=5
+repetitions:SHIFT?=1
+
+
+repeatlimit:SINGLE_TIME?=1
+repeatlimit:TOTAL_TIME?=30
+repeatlimit:TOTAL_FLOWS?=4000000
+
+newgen:PKT_REPLAY_COUNT=1
+//EXPAND( $PKTGEN_REPLAY_COUNT)
+//IGNORE=25
+IGNORE=0
+
+perfCPU:PERFTIME=20
+
+CLICK_PATH?=
+
+MAN_VERBOSE?=0
+VERBOSE?=0
+DBGPRINT?=
+debug:DBGPRINT=1
+
+// How frequently we dump informations from the LB?
+tstats:TSTATS_T=1
+gentstats:TSTATS_T?=1
+
+// Workaround for the path
+tom:MODULES_PATH=/home/tom/workspace/conntrack/connection_tracking/modules
+massimo:MODULES_PATH=/home/massimo/prj/connection_tracking/modules
+
+// What prefix to huse in DPDK hugepages?
+tom:PREFIX=tom
+massimo:PREFIX=massimo
+
+
+stateless:STATELESS=1
+
+
+-consistency:CONSISTENCY=
+consistency:CONSISTENCY=1
+
+flowbatch:FLOW_BATCH?=128
+
+%late_variables
+lb_capa:CAPACITY=EXPAND( $((  pow(2,ceil(log2(${CAPACITY}/$LB_CORES) ) ) * $LB_CORES  )) )
+-flowbatch:FLOWBATCH=
+flowbatch:FLOWBATCH=EXPAND( FLOW_BATCH $FLOW_BATCH)
+
+timing:TIMING_FNT=min(100,x*50)
+timing:TIMING=true
+DUT_IP=100.0.0.1
+DIP=10.0.0.
+SCALE=
+parallel:SCALE=, SCALE parallel
+shared:SCALE=, SCALE shared
+JUNK?=0
+
+// Calculate core list
+LB_LCORES?=$(( "%i-%i" % ( $LB_BCORE, $LB_BCORE + $LB_CORES ) ))
+tom:LB_NUMA=0
+massimo:LB_NUMA=1
+LB_CPUFREQ=
+LB_MEM?=4000
+moremem:LB_MEM?=8000
+moremoremem:LB_MEM?=45000
+//LB_MEM=8000
+
+staticthreads:STATICTHREADS?=1
+-staticthreads:STATICTHREADS?=0
+
+//CPUFREQ for the LB
+CPUFREQ=
+lb_low:CPUFREQ=1000
+lb_mid:CPUFREQ=1600
+lb_high:CPUFREQ=2300
+lb_max:CPUFREQ=3700
+CPUFREQ_CORES=EXPAND($LB_LCORES)
+CPUFREQ_NUMA=EXPAND($LB_NUMA)
+
+//Group for flow rules
+GROUP_RULES=
+group:GROUP_RULES=,MODE flow, FLOW_RULES_FILE rules
+//group:GROUP?=1
+
+_MANAGER= -> manager
+// If it's not Forwarder, populate the DST IP list of FlowIPLoadBalancer. Otherwise, empty element
+
+-stateless:_LB= $(( " -> FlowIPLoadBalancer(VIP $DUT_IP,"+ ", ".join(['DST $DIP%i' % i for i in range($NDIPS)]) +", NONSYN $NONSYN_ACCEPT, VERBOSE ${VERBOSE})" if "$MANAGER" != "Forwarder" else "" ))
+stateless:_LB= $(( " -> IPLoadBalancer(VIP $DUT_IP,"+ ", ".join(['DST $DIP%i' % i for i in range($NDIPS)]) +") " ))
+consistency:_LB= -> StoreFlowID(OFFSET 70)
+
+LB_MACPROMISC=, PROMISC false, MAC ${dut:0:mac}
+promisc:LB_MACPROMISC=, PROMISC true
+
+
+// Generator -> Allow to have a graph were we see where packets are lost
+COUNTER_RX=3
+
+// Do we want time statistics?
+TSTATS=
+tstats:TSTATS=1
+cpuload:CPU_LOAD=1
+
+CPU_LOAD?=0
+
+DBG_COUNTERS?=
+AVERAGE_COUNTER=
+average:AVERAGE_COUNTER=1
+
+GEN_CORES=0-15
+
+// Do we measure cycles?
+COUNT=
+cycles:COUNT=1
+COUNT_T=
+cyclesT:COUNT_T=1
+SETCOUNT= set_cycle_counter::Null
+CYCLECOUNT= cycle_counter::Null
+CYCLECOUNT_T= cycle_counterT::Null
+cycles:SETCOUNT=set_cycle_counter :: SetCycleCount;       
+cycles:CYCLECOUNT=cycle_counter :: CycleCountAccum; 
+cyclesT:CYCLECOUNT_T=cycle_counterT :: CycleCountAccum; 
+
+// Is it a HW version?
+
+hw:HW=1
+-hw:HW=EXPAND($(( "1" if "$MANAGER" in ["FlowIPManagerHW","FlowIPManagerHWCacheHT"] else "")))
+ 
+FLOW_TIMEOUT=EXPAND($((", FLOW_TIMEOUT $FLOW_TIMEOUT" if "$FLOW_TIMEOUT" else "")))
+
+FCBS_CAPACITY?=EXPAND($CAPACITY)
+
+// Is it a LAZY version?
+LAZY=("lazy" in "$MANAGER")
+
+// IMP_COUNTERS
+IMP_COUNTERS=0
+impcounters:IMP_COUNTERS=("$MANAGER" != "Forwarder")
+
+// Allow to save the RESULTS as PICKLE dump
+dumpresults:DUMP_RESULTS=1
+DUMP_RESULTS?=0
+
+
+repetitions:TIMEOUT?=$(( int(ceil( $SINGLE_TIME * $REPETITIONS ) ) ))
+repetitions:RECYCLE_INTERVAL?=$(( $SINGLE_TIME * $REPETITIONS / $RECYCLE_RATIO ))
+
+
+
+// ------------- GENERATOR
+
+%mindump,oldgen:import@client fastclick-mindump delay=1 timeout=90
+
+%newgen:import@client fastclick-play-conntrack delay=0 GEN_PIPELINE=0 GEN_THREADS=4 GEN_MULTI_TRACE=0 PKTGEN_REPLAY_COUNT=1
+
+//------------- LB
+%-dummy,-testpmd:script@dut sudo=true timeout=90
+${GDB} ${CLICK_PATH}click --dpdk -l${LB_LCORES} --socket-mem=${LB_MEM} -a ${dut:0:pci} --file-prefix=${PREFIX}_LB -- LB_CONFIG
+
+// Fake LB to test scripts
+%dummy:script@dut timeout=90
+while true; do echo "SLEEP!"; sleep 1; done
+
+%testpmd:script@dut timeout=90
+sudo ~/dpdk-20.08/install/bin/dpdk-testpmd -a d5:00.0 --file-prefix=${PREFIX}_TESTPMD -l 28-35 --socket-mem=0,4000 -- --nb-cores=7 --rxq=7 --txq=7 --forward-mode=macswap
+
+// CPUFREQ on LB
+%import@dut cpufreq-script
+//%import@dut cpufreq-script waitfor=LB_DONE autokill=false CPUFREQ=
+
+
+// ------------- CONFIGS
+
+%file@dut LB_CONFIG
+
+// $(( "" if "$TOTAL_TIME" else "")) Message("REPETITON MODE: received SINGLE_TIME $SINGLE_TIME, REPETITIONS $REPETITIONS")
+// $(( "" if "$TOTAL_TIME" else "")) Message("REPETITON MODE: will run with TIMEOUT ${TIMEOUT} and RECYCLE_INTERVAL ${RECYCLE_INTERVAL}")
+
+require(library ${MANAGER})
+
+$SETCOUNT
+$CYCLECOUNT
+$CYCLECOUNT_T
+
+
+
+elementclass DBGPrint{ $id |
+    input
+    $(("" if "$DBGPRINT" else "//")) -> Print($id, MAXLENGTH 128)
+    -> output
+
+}
+
+fd0 :: FromDPDKDevice(${dut:0:pci}, PAUSE $PAUSE, NUMA 0, NUMA_NODE $LB_NUMA, THREADOFFSET ${LB_BCORE}, VERBOSE 99 $LB_MACPROMISC $SCALE, PAINT_QUEUE true, MAXTHREADS ${LB_CORES} $GROUP_RULES)
+    -> DBGPrint(1)
+    -> set_cycle_counter
+    -> DBGPrint(2)
+    -> Strip(14)
+    -> CheckIPHeader(CHECKSUM false, VERBOSE $VERBOSE)
+    -> DBGPrint(3)
+    //-> printer :: IPPrint()
+    $_MANAGER
+    -> DBGPrint(4)
+    ${_LB}
+//    -> StoreIPAddress(OFFSET 64)
+    -> DBGPrint(5)
+    -> Unstrip(14)
+    -> EtherMirror
+    $(( "-> avg:: AverageCounterMP()" if "$AVERAGE_COUNTER" else ""))
+    -> cycle_counter -> cycle_counterT
+    -> DBGPrint(6)
+    -> td0 :: ToDPDKDevice(${dut:0:pci}, VERBOSE 99, BLOCKING true)
+
+dm :: DriverManager(
+	    print "LB_STARTED",
+	    //$(( ("wait %is, write cycle_counter.reset_counts, write manager.dbg_reset, " % ${IGNORE}+10 ) if "$DBG_COUNTERS" else "" ))
+	    wait,
+	    print "COUNTER-1-RESULT-RXCOUNT $(fd0.count)",
+	    print "COUNTER-2-RESULT-TXCOUNT $(td0.count)",
+	    print "RESULT-ACTUAL_CAPACITY "$(manager.capacity),
+	    print "RESULT-TOTAL_CAPACITY "$(manager.total_capacity),
+	    // Print also the capacity parameter so we can keep track of it
+	    print "RESULT-ASKED_CAPACITY ${CAPACITY}",
+
+	    $(("" if "$HW" else "//")) print "RESULT-RULES "$(manager.flow_rules_count),
+	    $(("" if "$HW" else "//")) print "RESULT-TOT_FLOWS "$(manager.total_count),
+	    $(("" if "$HW" and $IMP_COUNTERS else "//")) print "RESULT-HW_MATCHED "$(manager.matched_hw_packets),
+	    $(("" if "$HW" and $IMP_COUNTERS else "//")) print "RESULT-HW_MATCHED_RATIO "$(manager.matched_hw_packets_ratio),
+	    $(("" if "$HW" and $IMP_COUNTERS else "//")) print "RESULT-HW_FLOW_INSERTS "$(manager.flow_inserts),
+	    $(("" if "$HW" and $IMP_COUNTERS else "//")) print "RESULT-HW_FLOW_DELETED "$(manager.flow_deleted),
+	    $(("" if "$HW" and $IMP_COUNTERS else "//")) print "RESULT-HT_LOOKUPS "$(manager.ht_lookups),
+	    
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-INSERTS "$(manager.inserts),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-LOOKUPS "$(manager.lookups),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-INSERTS_CYCLES "$(manager.inserts_cycles),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-LOOKUPS_CYCLES "$(manager.lookups_cycles),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-TOTAL_CYCLES "$(manager.total_cycles),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-KILLED_PACKETS "$(manager.killed_packets),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-MATCHED_PACKETS "$(manager.matched_packets),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-MATCHED_PACKETS_RATIO "$(manager.matched_packets_ratio),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-FLOWS "$(manager.count),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-AVG_LOAD "$(manager.avg_load),
+	    $(("" if $IMP_COUNTERS else "//")) print "RESULT-MAX_LOAD "$(manager.max_load),
+
+	    // Print maintain_removed or recycled depending on the deletion method used (if any)
+	    $(("" if $IMP_COUNTERS and not $LAZY else "//")) print "RESULT-RECYCLED "$(manager.maintain_removed),
+	    $(("" if $IMP_COUNTERS and $LAZY else "//")) print "RESULT-RECYCLED "$(manager.recycled_entries),
+
+	    // // Print either reccyled or maintain to avoid errors in plot
+	    // $(("" if $IMP_COUNTERS and "$MANAGER" != "FlowIPManagerIMP_lazy" else "//")) print "RESULT-RECYCLED 0",
+	    // $(("" if $IMP_COUNTERS and "$MAINTAIN_T" == 0 else "//")) print $(now)"-RESULT-MAINTAIN 0",
+	
+	    print "queues-0-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q0_packets)),
+	    print "queues-1-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q1_packets)),
+	    print "queues-2-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q2_packets)),
+	    print "queues-3-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q3_packets)),
+	    print "queues-4-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q4_packets)),
+	    print "queues-5-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q5_packets)),
+	    print "queues-6-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q6_packets)),
+	    print "queues-7-RESULT-PACKETS "$(max 0 $(fd0.xstats rx_q7_packets)),
+	    $(( "" if "$TOTAL_TIME" else "//")) print "RESULT-REPETITIONS_TIMEOUT "$TIMEOUT,
+	    $(( "" if "$TOTAL_TIME" else "//")) print "RESULT-REPETITIONS_RECYCLE_INTERVAL "$RECYCLE_INTERVAL,
+
+	    read fd0.xstats,
+	    print "LB_DONE"
+	    )
+
+// Print statistics periodically
+s::Script( TYPE $(( "ACTIVE" if "$TSTATS" else "PASSIVE" )),
+
+    init lastdropped 0,
+    init lastk 0,
+	set t $(now),
+
+	print $t"-RESULT-OOB "$(fd0.xstats rx_out_of_buffer),
+	print $t"-RESULT-RXHWCOUNT "$(fd0.hw_count),
+
+	$(("" if "$HW" else "//")) print $t"-RESULT-RULES "$(manager.flow_rules_count),
+	$(("" if "$HW" else "//")) print $t"-RESULT-TOT_FLOWS "$(manager.total_count),
+	$(("" if "$HW" and $IMP_COUNTERS else "//")) print $t"-RESULT-HW_MATCHED "$(manager.matched_hw_packets),
+	$(("" if "$HW" and $IMP_COUNTERS else "//")) print $t"-RESULT-HW_MATCHED_RATIO "$(manager.matched_hw_packets_ratio),
+	$(("" if "$HW" and $IMP_COUNTERS else "//")) print $t"-RESULT-HW_FLOW_INSERTS "$(manager.flow_inserts),
+	$(("" if "$HW" and $IMP_COUNTERS else "//")) print $t"-RESULT-HW_FLOW_DELETED "$(manager.flow_deleted),
+	$(("" if "$HW" and $IMP_COUNTERS else "//")) print $t"-RESULT-HT_LOOKUPS "$(manager.ht_lookups),
+
+
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-DROPPED "$(sub $(fd0.hw_dropped) $lastdropped),
+    set $lastdropped $(fd0.hw_dropped),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-LOOKUPS "$(manager.lookups),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-INSERTS_CYCLES "$(manager.inserts_cycles),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-LOOKUPS_CYCLES "$(manager.lookups_cycles),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-TOTAL_CYCLES "$(manager.total_cycles),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-KILLED_PACKETS "$(manager.killed_packets),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-MATCHED_PACKETS "$(manager.matched_packets),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-MATCHED_PACKETS_RATIO "$(manager.matched_packets_ratio),
+	
+	$(("" if $IMP_COUNTERS else "//")) set count $(max 0 $(manager.count)),
+	$(("" if $IMP_COUNTERS and $LAZY else "//")) set total_flows $(manager.total_flows),
+	$(("" if $IMP_COUNTERS else "//")) set avg_load $(mul $(max 0 $(manager.avg_load)) 100),
+
+	$(("" if $IMP_COUNTERS else "//")) set max_load $(mul $(max 0 $(manager.max_load)) 100),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-FLOWS "$count,
+	
+	//$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-TOTAL_CAPACITY "$(manager.total_capacity),
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-AVG_LOAD "$avg_load,
+	$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-MAX_LOAD "$max_load,
+	//$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-OVERFLOW "$(manager.overflow),
+	// $(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-MAINTAIN "$(manager.maintain_removed),
+	// $(("" if $IMP_COUNTERS and "$MANAGER" == "FlowIPManagerIMP_lazy" else "//")) print $t"-RESULT-RECYCLED "$(manager.recycled_entries),
+
+	$(("" if $IMP_COUNTERS and not $LAZY else "//")) print $t"-RESULT-RECYCLED "$(manager.maintain_removed),
+	$(("" if $IMP_COUNTERS and $LAZY else "//")) print $t"-RESULT-RECYCLED "$(manager.recycled_entries),
+
+
+	$(("" if $IMP_COUNTERS and $LAZY else "//")) print $t"-RESULT-TOTAL_FLOWS "$total_flows,
+	$(("" if "$CPU_LOAD" else "//")) print $t"-RESULT-CPU_LOAD "$(add $(load)),
+    set k $(add $(useful_kcycles)),
+	$(("" if "$CPU_LOAD" else "//")) print $t"-RESULT-USEFUL_KCYCLES "$(sub $k $lastk),
+    set lastk $k,
+	$(("" if "$CPU_LOAD" else "//")) print $t"-RESULT-LOAD_CYCLES "$(add $(load_cycles)),
+	//$(("" if $IMP_COUNTERS else "//")) print $t"-RESULT-FULL_TABLES "$(manager.full_tables),
+	$(("" if $IMP_COUNTERS else "//")) print "flows-"$count"-RESULT-AVG_LOAD "$avg_load,
+	$(("" if $IMP_COUNTERS else "//")) print "flows-"$count"-RESULT-INSERTS "$(manager.inserts),
+	$(("" if $IMP_COUNTERS else "//")) print "flows-"$count"-RESULT-LOOKUPS "$(manager.lookups),
+	$(("" if $IMP_COUNTERS else "//")) print "flows-"$count"-RESULT-INSERTS_CYCLES "$(manager.inserts_cycles),
+	$(("" if $IMP_COUNTERS else "//")) print "flows-"$count"-RESULT-LOOKUPS_CYCLES "$(manager.lookups_cycles),
+	$(("" if $IMP_COUNTERS else "//")) print "flows-"$count"-RESULT-TOTAL_CYCLES "$(manager.total_cycles),
+	$(("" if $IMP_COUNTERS and $LAZY else "//")) print "totalflows-"$total_flows"-RESULT-RECYCLED "$(manager.recycled_entries),
+	$(("" if $IMP_COUNTERS and $LAZY else "//")) print "totalflows-"$total_flows"-RESULT-FLOWS "$count,
+	$(("" if $IMP_COUNTERS and $LAZY else "//")) print "flows-"$count"-RESULT-TOTAL_FLOWS "$total_flows,
+	
+	//read manager.rules_count,
+        // read fd0.out_of_buffer,
+        wait ${TSTATS_T}s,
+        loop
+      )
+
+// Print statistics periodically
+s4 :: Script( TYPE $(( "ACTIVE" if "$TSTATS" else "PASSIVE" )),
+
+	$(("" if $IMP_COUNTERS else "//")) set avg_load $(mul $(max 0 $(manager.avg_load)) 100),
+	$(("" if $IMP_COUNTERS else "//")) goto passic $(eq $(manager.inserts_cycles) 0), print "avgload-"$avg_load"-RESULT-INSERTS_CYCLES "$(manager.inserts_cycles), label passic,
+	$(("" if $IMP_COUNTERS else "//")) print "avgload-"$avg_load"-RESULT-LOOKUPS_CYCLES "$(manager.lookups_cycles),
+	$(("" if $IMP_COUNTERS else "//")) print "avgload-"$avg_load"-RESULT-TOTAL_CYCLES "$(manager.total_cycles),
+        wait 0.2s,
+        loop
+)
+
+
+
+// The Throughput is less frequent -> It is resetted every time so we leave more time to generate
+s2 :: Script( TYPE $(( "ACTIVE" if "$TSTATS" and "$AVERAGE_COUNTER" else "PASSIVE" )),
+	print $(now)"-RESULT-TH "$(avg.bit_rate),
+	write avg.reset,
+	wait $(($TSTATS_T * 3))s,
+	loop)
+s3 :: Script( TYPE $(( "ACTIVE" if "$COUNT_T" else "PASSIVE" )),
+	print $(now)"-RESULT-CYCLES-PP "$(cycle_counterT.cycles_pp),
+	write cycle_counterT.reset_counts,
+	wait $(($TSTATS_T * 3))s,
+	loop)
+
+Script( 
+	print $(now)"-RESULT-IFLOWS "$(manager.count),
+	print $(now)"-RESULT-ICOUNT "$(fd0.count),
+	wait 0.5s,
+	loop
+      )
+
+
+$(("" if $STATICTHREADS else "//")) StaticThreadSched(dm -1, s -1, s2 -1, s3 -1);
+
+//------------------------------- Configurations for FlowIPManager elements
+%file@dut Forwarder
+manager::Null
+
+%file@dut FlowIPManager
+manager::FlowIPManager(CAPACITY $CAPACITY, LF $LF)
+
+%file@dut FlowIPManagerSpinlock
+manager::FlowIPManagerSpinlock(CAPACITY $CAPACITY, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL, $FLOWBATCH)
+
+%file@dut FlowIPManagerMutex
+manager::FlowIPManagerMutex(CAPACITY $CAPACITY, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL, $FLOWBATCH)
+
+%file@dut FlowIPManagerMP
+manager::FlowIPManagerMP(CAPACITY $CAPACITY, LF $LF, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL, $FLOWBATCH)
+
+%file@dut FlowIPManagerIMP
+manager::FlowIPManagerIMP(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerIMP_NoFID
+manager::FlowIPManagerIMP_NoFID(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerIMP_FOD
+manager::FlowIPManagerIMP_FOD(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerMP_FOD
+manager::FlowIPManagerMP_FOD(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, LF $LF, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerIMP_lazy
+manager::FlowIPManagerIMP_lazy(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, ALWAYS_RECYCLE $ALWAYS_RECYCLE, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerMP_lazy
+manager::FlowIPManagerMP_lazy(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, ALWAYS_RECYCLE $ALWAYS_RECYCLE, RECYCLE_INTERVAL $RECYCLE_INTERVAL, LF $LF, $FLOWBATCH)
+
+%file@dut FlowIPManagerMP_lazyIDs
+manager::FlowIPManagerMP_lazyIDs(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, ALWAYS_RECYCLE $ALWAYS_RECYCLE, RECYCLE_INTERVAL $RECYCLE_INTERVAL, LF $LF, $FLOWBATCH)
+
+%file@dut FlowIPManager_CPPIMP
+manager::FlowIPManager_CPPIMP(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManager_CuckooPPIMP
+manager::FlowIPManager_CuckooPPIMP(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManager_CuckooPPIMP_lazy
+manager::FlowIPManager_CuckooPPIMP_lazy(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL, TIMEOUT $TIMEOUT)
+
+%file@dut FlowIPManagerHS_IMP
+manager::FlowIPManagerHS_IMP(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+// %file@dut FlowIPManagerHS_IMP_MOD
+// manager::FlowIPManagerHS_IMP_MOD(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_MOD_60
+// manager::FlowIPManagerHS_IMP_MOD_60(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+%file@dut FlowIPManager_RobinMapIMP
+manager::FlowIPManager_RobinMapIMP(CAPACITY $CAPACITY, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerHW
+manager::FlowIPManagerHW(CAPACITY $CAPACITY, HT_CAPACITY $HT_CAPACITY, DEV fd0, HWLIMIT $HWLIMIT, VERBOSE $MAN_VERBOSE, GROUP $GROUP,  AUTOCLEAN $AUTOCLEAN, HW_THRESHOLD $THRESHOLD)
+
+%file@dut FlowIPManagerH
+manager::FlowIPManagerH(CAPACITY $CAPACITY, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerHIMP
+manager::FlowIPManagerHIMP(CAPACITY $CAPACITY, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerHMP
+manager::FlowIPManagerHMP(CAPACITY $CAPACITY, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL, $FLOWBATCH)
+
+// %file@dut FlowIPManagerHS_IMP_10
+// manager::FlowIPManagerHS_IMP_10(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_10_STORE
+// manager::FlowIPManagerHS_IMP_10_STORE(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_20
+// manager::FlowIPManagerHS_IMP_20(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_20_STORE
+// manager::FlowIPManagerHS_IMP_20_STORE(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_30
+// manager::FlowIPManagerHS_IMP_30(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_30_STORE
+// manager::FlowIPManagerHS_IMP_30_STORE(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_40
+// manager::FlowIPManagerHS_IMP_40(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_50
+// manager::FlowIPManagerHS_IMP_50(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+// %file@dut FlowIPManagerHS_IMP_60
+// manager::FlowIPManagerHS_IMP_60(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT)
+
+%file@dut FlowIPManagerIMP_TW
+manager::FlowIPManagerIMP_TW(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL)
+
+%file@dut FlowIPManagerMP_TW
+manager::FlowIPManagerMP_TW(CAPACITY $CAPACITY, VERBOSE $MAN_VERBOSE, TIMEOUT $TIMEOUT, RECYCLE_INTERVAL $RECYCLE_INTERVAL, LF $LF, $FLOWBATCH)
+
+//-------------------------- profiling scripts
+%perfCPU:script@dut sudo=true autokill=false timeout=90
+sleep ${IGNORE}
+perf record --call-graph=dwarf -o perf.data -r 80 -F 1000 -C ${LB_LCORES} -p `pidof click`
+
+%perfCPU:exit@dut sudo=true
+sudo chmod 666 perf.data
+if [ -e  "./perf.data" ]; then
+    #perf script -F +pid > perf_preprocessed.data
+    sudo chmod 666 perf*
+fi
+
+%perfCACHE:script@dut sudo=true delay=5 autokill=false timeout=90
+echo "Starting perf..."
+perf stat -a -I 1000 -C ${LB_LCORES} -e "LLC-loads,LLC-load-misses,L1-dcache-load-misses,L1-dcache-loads,cycles" -o stats.log -- bash -c "date '+RESULT-PERF_START %s'; sleep 1000"
+//perf stat -a -I 1000 -C ${LB_LCORES} -e "LLC-loads,LLC-load-misses,L1-dcache-load-misses,L1-dcache-loads,cycles" -o stats.log -p `pidof click`
+
+//%perfCACHE:exit@dut sudo=true autokill=false timeout=90
+%perfCACHE:script@dut sudo=true waitfor=GEN_DONE autokill=false
+${MODULES_PATH}/kill_user_processes.py --process perf --signal 7 --user ${USER}
+sudo chmod 666 stats.log
+#${MODULES_PATH}/cache_stats.sh stats.log
+
+
+
+// Flow rules for HW
+%group:file@dut rules1
+ingress group 0 pattern end actions jump group ${GROUP} / end
+ingress group ${GROUP} pattern end actions queue index 0 / end
+%group:file@dut rules
+ingress group 0 pattern end actions jump group ${GROUP} / end
+ingress group ${GROUP} pattern end actions rss func default level 0 types ipv4 tcp udp end queues $(( " ".join([str(i) for i in range($LB_CORES)]) )) end / end
+
+
+
+%pyexit
+# Include a Python script to do the post processing of the values
+import sys
+from os.path import abspath
+added = False
+if not added:
+    sys.path.append(MODULES_PATH)
+    added = True
+
+import post_processing
+import perf_postprocessing
+
+try:
+    if "PERF_START" in RESULTS:
+        perf_postprocessing.perf_postprocessing("stats.log", KIND_RESULTS, RESULTS)
+except:
+    print("Error while processing PERF results")
+
+try:
+    post_processing.post_processing(KIND_RESULTS, RESULTS, LB_CORES, DUMP_RESULTS)
+except:
+    print("Error while running post processing script")
+
+#from IPython import embed
