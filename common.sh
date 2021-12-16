@@ -10,7 +10,7 @@ if [ "$USER" == "massimo" ]; then
 elif [ "$USER" == "tom" ]; then
     CLUSTER="--cluster client=nslrack26-100G,nic=0 dut=nslrack14-100G,nic=0"
 else
-    echo "UNKNOWN USER! ABORTING"
+    echo "UNKNOWN USER! ABORTING. Please set the cluster parameters in common.sh."
     exit 1
 fi
 
